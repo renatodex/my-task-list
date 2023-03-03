@@ -41,14 +41,38 @@ export async function getTaskItems () {
     4: {
       id: 4,
       name: 'Another task',
-      position: 1,
+      position: 0,
       task_list_id: 2,
     },
     5: {
       id: 5,
+      name: 'Another task II',
+      position: 1,
+      task_list_id: 2,
+    },
+    6: {
+      id: 6,
       name: 'Extra task',
+      position: 0,
+      task_list_id: 3,
+    },
+    7: {
+      id: 7,
+      name: 'Simple Task',
       position: 1,
       task_list_id: 3,
+    },
+    8: {
+      id: 8,
+      name: 'Hard task',
+      position: 2,
+      task_list_id: 3,
+    },
+    9: {
+      id: 9,
+      name: 'Special task',
+      position: 3,
+      task_list_id: 1,
     },
   }
 }

@@ -1,65 +1,15 @@
 import { useState, useEffect } from 'react'
 import { getTaskLists, getTaskItems } from '../client/api'
+import TaskList from '../components/task_list'
 
-const TaskList = ({ taskList, taskItems, onUpdateTaskItem, onCreateTaskItem }) => {
-  return (
-    <div className='border border-solid border-grey-200 shadow-md bg-white'>
-      <h2 className='p-4' style={{ backgroundColor: taskList.color }}>{taskList.name}</h2>
-      <div className='p-4'>
-        {taskItems.map((taskItem) => (
-          <div className='flex gap-4 mb-2' key={taskItem.id}>
-            <div>
-              <button
-                className='bg-gray-200 p-2'
-                type="button"
-                onClick={(e) => { onUpdateTaskItem(taskItem, -1) }}
-              >
-                &lt;
-              </button>
-            </div>
-            <div key={taskItem.id}>
-              {taskItem.name}
-            </div>
-            <div>
-              <button
-                className='bg-gray-200 p-2'
-                type="button"
-                onClick={(e) => { onUpdateTaskItem(taskItem, +1) }}
-              >
-                &gt;
-              </button>
-            </div>
-          </div>
-        ))}
-        <button
-          className='bg-gray-200 p-2 w-full'
-          onClick={e => {
-            const name = prompt('Task name?')
-            onCreateTaskItem({
-              id: crypto.randomUUID(),
-              name,
-              task_list_id: taskList.id,
-            })
-          }}
-        >
-          Add task
-        </button>
-      </div>
-    </div>
-  )
-}
-
-const filterTaskItemsForList = function(taskItems, taskListId) {
-  const taskItemsArray = Object.values(taskItems)
-
-  const filteredItems = taskItemsArray.filter((taskItem) => {
-    return taskItem.task_list_id === taskListId
-  })
-
-  return filteredItems.sort((p,n) => {
-    return p.position > n.position ? 1 : -1
-  })
-}
+import {
+  isFirstTaskInList,
+  targetListHasItemInSamePosition,
+  getItemsWithPositionGreaterThan,
+  getItemsWithPositionLesserThan,
+  filterTaskItemsForList,
+  convertArrayToIdValueObject
+} from '../util/helper'
 
 export default function Home () {
   const [taskLists, setTaskLists] = useState([])
@@ -80,64 +30,96 @@ export default function Home () {
     fetchTaskItems()
   }, [])
 
-  function isFirstTaskInList(taskItem) {
-    const allTasksInList = filterTaskItemsForList(taskItems, taskItem.task_list_id)
-    return allTasksInList[0] == taskItem
+  function rebuildItemsWhenMovingFromFirstPosition ({
+    taskItem,
+    allTaskItemsInTargetList,
+    taskListId,
+  }) {
+    // Recalculate TaskItem positions in the target list
+    return convertArrayToIdValueObject(
+      [taskItem, ...allTaskItemsInTargetList].map((item, index) => ({
+        ...item,
+        position: index,
+        task_list_id: taskListId,
+      }))
+    )
   }
 
-  function onUpdateTaskItem( taskItem, offset ) {
+  function rebuildItemsWhenMovingFromInnerPositions ({
+    taskItem,
+    allTaskItemsInTargetList,
+    taskListId,
+  }) {
+    // Rebuild the final Task Item order and recalculate positions for the whole list
+    return convertArrayToIdValueObject(
+      [
+        ...getItemsWithPositionLesserThan(taskItem, allTaskItemsInTargetList),
+        taskItem,
+        ...getItemsWithPositionGreaterThan(taskItem, allTaskItemsInTargetList)
+      ].map((item, index) => {
+        return {
+          ...item,
+          position: index,
+          task_list_id: taskListId,
+        }
+      })
+    )
+  }
+
+  function rebuildItemsWhenMovingFromBiggerLists ({
+    taskItem,
+    allTaskItemsInTargetList,
+    taskListId,
+  }) {
+    // Recalculate the Task Item positions in the target list after adding the moved item
+    return convertArrayToIdValueObject(
+      [...allTaskItemsInTargetList, taskItem].map((item, index) => {
+        return {
+          ...item,
+          position: index,
+          task_list_id: taskListId,
+        }
+      })
+    )
+  }
+
+  async function onUpdateTaskItem({ taskItem, sourceList, offset }) {
     const taskListsArray = Object.values(taskLists)
-    const taskItemListIndex = taskListsArray.findIndex((taskList) => {
-      return taskList.id === taskItem.task_list_id
-    })
-    const targetList = taskListsArray[taskItemListIndex + offset]
+    const indexOfTargetList = taskListsArray.findIndex((taskList) => ( taskList.id === taskItem.task_list_id ))
+    const targetList = taskListsArray[indexOfTargetList + offset]
+    const allTaskItemsInTargetList = filterTaskItemsForList(taskItems, targetList.id)
+    const sourceListItemsChanges = convertArrayToIdValueObject(
+      filterTaskItemsForList(taskItems, sourceList.id).filter((item) => (
+        item.id !== taskItem.id
+      )).map((item, index) => ({ ...item, position: index }))
+    )
+    let targetListItemsChanges = {}
 
-    if (isFirstTaskInList(taskItem)) {
-      const allTasksInTargetList = filterTaskItemsForList(taskItems, targetList.id)
-
-      const updatedItemsArray = allTasksInTargetList.filter ((item) => {
-        return item.id != taskItem.id
+    if (isFirstTaskInList(taskItem, taskItems)) {
+      targetListItemsChanges = rebuildItemsWhenMovingFromFirstPosition({
+        taskItem,
+        allTaskItemsInTargetList,
+        taskListId: targetList.id
       })
-
-      const mappedUpdatedItemsArray = updatedItemsArray.map((item) => {
-        return {
-          ...item,
-          position: 0,
-        }
-      }).map((item) => {
-        return {
-          ...item,
-          position: item.position + 1,
-        }
+    } else if(targetListHasItemInSamePosition(taskItem, allTaskItemsInTargetList)) {
+      targetListItemsChanges = rebuildItemsWhenMovingFromInnerPositions({
+        taskItem,
+        allTaskItemsInTargetList,
+        taskListId: targetList.id
       })
-
-      const updatedItems = mappedUpdatedItemsArray.reduce((acc, item) => {
-        acc[item.id] = item
-        return acc
-      }, {})
-
-      const newValue = {
-        ...taskItems,
-        ...updatedItems,
-        [taskItem.id]: {
-          ...taskItem,
-          task_list_id: taskListsArray[taskItemListIndex + offset].id,
-          position: 0,
-        }
-      }
-
-      console.log('updated', newValue)
-
-      setTaskItems(newValue)
     } else {
-      setTaskItems({
-        ...taskItems,
-        [taskItem.id]: {
-          ...taskItem,
-          task_list_id: taskListsArray[taskItemListIndex + offset].id,
-        }
+      targetListItemsChanges = rebuildItemsWhenMovingFromBiggerLists({
+        taskItem,
+        allTaskItemsInTargetList,
+        taskListId: targetList.id
       })
     }
+
+    setTaskItems({
+      ...taskItems,
+      ...sourceListItemsChanges,
+      ...targetListItemsChanges,
+    })
   }
 
   function onCreateTaskItem(taskItem) {
